@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>نظام إدارة مخازن الأدوية البيطرية - ERP v24</title>
+<title>نظام إدارة مخازن الأدوية البيطرية - ERP v25</title>
 <style>
 /* ============ المتغيرات والثيم ============ */
 :root{
@@ -416,7 +416,7 @@ function toast(msg,type=''){const t=document.createElement('div');t.className='t
 
 /* ---------- إدارة الحالة والتخزين ---------- */
 const DB_KEY='vetpharm_erp_v1';
-const APP_VERSION='v24 — 2026-06-22';
+const APP_VERSION='v25 — 2026-06-22';
 let DB={};
 
 /* ====================================================================
@@ -617,7 +617,7 @@ function buildNav(){
 }
 function go(id){
   // ضمان إخفاء شاشة الدخول طالما هناك جلسة أو في الوضع المحلي
-  if(fbUser||!fbConfigured()){$('#loginScreen').classList.remove('show');$('#app').classList.add('ready');}
+  if(fbUser||!fbConfigured()){showApp();}
   currentPage=id;
   const m=MODULES.find(x=>x.id===id);
   $('#pageTitle').textContent=m.name;$('#pageSub').textContent=m.sub;
@@ -894,48 +894,54 @@ function addUserModal(){
 }
 
 let currentUserRole='مدير عام';
-let authWatch=null;
+/* ====== تبديل قاطع بين شاشة الدخول والتطبيق (inline style) ====== */
+function showLogin(){
+  const ls=$('#loginScreen'),ap=$('#app');
+  if(ls){ls.style.display='flex';ls.style.alignItems='center';ls.style.justifyContent='center';}
+  if(ap){ap.style.display='none';}
+}
+function showApp(){
+  const ls=$('#loginScreen'),ap=$('#app');
+  if(ls){ls.style.display='none';}
+  if(ap){ap.style.display='flex';}
+}
+let authWatch=null, authResolved=false;
 function startAuthWatchdog(){
   if(authWatch)return;
   authWatch=setInterval(()=>{
-    if(fbUser){
-      // طالما هناك جلسة: شاشة الدخول مخفية والتطبيق ظاهر دائماً
-      const ls=$('#loginScreen');
-      if(ls&&ls.classList.contains('show'))ls.classList.remove('show');
-      const ap=$('#app');
-      if(ap&&!ap.classList.contains('ready'))ap.classList.add('ready');
-    }
-  },500);
+    if(fbUser){showApp();}
+    else if(authResolved&&fbConfigured()){showLogin();}
+  },400);
 }
 function boot(){
+  // ابدأ بإخفاء الاثنين لتفادي أي وميض قبل تحديد الحالة
+  const ls=$('#loginScreen'),ap=$('#app');
+  if(ls)ls.style.display='none';
+  if(ap)ap.style.display='none';
   loadDB();
   autoDailyBackup();
   $('#curDate').textContent=new Date().toLocaleDateString('ar-EG');
   if($('#verChip'))$('#verChip').textContent=APP_VERSION;
-  // وضع Firebase أو وضع محلي
   if(fbConfigured()&&initFirebase()){
     setSync('offline');
-    let authSettled=false;
+    startAuthWatchdog();
     fbAuth.onAuthStateChanged(user=>{
-      authSettled=true;
+      authResolved=true;
       if(user){
         fbUser=user;
-        $('#loginScreen').classList.remove('show'); // ضمان الإخفاء فوراً
+        showApp();
         onLoggedIn();
       }else{
         fbUser=null;
-        $('#app').classList.remove('ready');
-        // أظهر الدخول فقط بعد تأكّد عدم وجود جلسة (تفادي وميض أثناء استرجاع الجلسة)
-        setTimeout(()=>{ if(!fbUser){$('#loginScreen').classList.add('show');} },400);
+        showLogin();
       }
     });
     $('#lg_btn').onclick=doLogin;
     $('#lg_pass').onkeydown=e=>{if(e.key==='Enter')doLogin();};
   }else{
-    // وضع محلي بالكامل (بدون Firebase) — للتجربة من ملف file://
+    // وضع محلي (file://) — بدون دخول
     setSync('local');
-    $('#loginScreen').classList.remove('show');
-    $('#app').classList.add('ready');
+    showApp();
     $('#logoutBtn').style.display='none';
     buildNav();go('dashboard');
   }
@@ -954,9 +960,7 @@ function doLogin(){
 }
 function doLogout(){if(fbAuth)fbAuth.signOut();}
 async function onLoggedIn(){
-  $('#loginScreen').classList.remove('show');
-  $('#app').classList.add('ready');
-  startAuthWatchdog();
+  showApp();
   $('#lg_msg').textContent='';if($('#lg_pass'))$('#lg_pass').value='';
   $('#logoutBtn').style.display='inline-flex';
   // حدد دور المستخدم من جدول المستخدمين في السحابة
