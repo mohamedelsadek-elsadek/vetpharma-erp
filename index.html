@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>نظام إدارة مخازن الأدوية البيطرية - ERP</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>نظام إدارة مخازن الأدوية البيطرية - ERP v21</title>
 <style>
 /* ============ المتغيرات والثيم ============ */
 :root{
@@ -167,8 +170,9 @@ td input,td select{padding:5px 7px;font-size:12px;border-radius:6px}
   .form-grid{grid-template-columns:1fr}
   .topbar .sub{display:none}
 /* ===== شاشة الدخول والتزامن ===== */
-#loginScreen{position:fixed;inset:0;display:grid;place-items:center;z-index:500;padding:20px;
+#loginScreen{position:fixed;inset:0;display:none;place-items:center;z-index:500;padding:20px;
   background:radial-gradient(800px 500px at 75% -10%,#e4e1ff,transparent 60%),radial-gradient(700px 500px at 10% 110%,#dff3ff,transparent 55%),var(--bg)}
+#loginScreen.show{display:grid}
 #loginScreen.hidden{display:none!important}
 .login-box{background:linear-gradient(180deg,#ffffff,#fbfbfe);border:1px solid var(--border);border-radius:24px;padding:44px 38px;width:100%;max-width:430px;box-shadow:var(--shadow);position:relative;overflow:hidden}
 .login-box::before{content:'';position:absolute;inset:0 0 auto 0;height:5px;background:var(--grad)}
@@ -216,6 +220,7 @@ td input,td select{padding:5px 7px;font-size:12px;border-radius:6px}
       <div><h2 id="pageTitle">لوحة التحكم</h2><div class="sub" id="pageSub">نظرة عامة على المخزون والأداء</div></div>
       <div class="right">
         <span class="sync-pill"><span class="sync-dot" id="syncDot"></span><span id="syncTxt">...</span></span>
+        <span class="chip" style="font-size:10px;color:var(--text3)" id="verChip"></span>
         <span class="chip">👤 <b id="curRole">مدير عام</b></span>
         <span class="chip">📅 <b id="curDate"></b></span>
         <button class="btn sm green" onclick="printCurrentPage()" title="طباعة الصفحة الحالية">🖨️ طباعة</button>
@@ -411,6 +416,7 @@ function toast(msg,type=''){const t=document.createElement('div');t.className='t
 
 /* ---------- إدارة الحالة والتخزين ---------- */
 const DB_KEY='vetpharm_erp_v1';
+const APP_VERSION='v21 — 2026-06-22';
 let DB={};
 
 /* ====================================================================
@@ -450,18 +456,26 @@ function initFirebase(){
     return true;
   }catch(e){console.error('Firebase init error',e);return false;}
 }
+let lastCloudJSON='';
 function attachRealtime(){
   if(!fbReady)return;
   dbRef=fbDB.ref('erp_data');
   dbRef.on('value',snap=>{
     const val=snap.val();
     if(val&&val.products){
+      const incoming=JSON.stringify(val);
+      setSync('online');
+      // تجاهل لو البيانات نفسها (صدى الكتابة بتاعتنا) — يمنع الوميض
+      if(incoming===JSON.stringify(DB)||incoming===lastCloudJSON){lastCloudJSON=incoming;return;}
+      lastCloudJSON=incoming;
+      // لا تقاطع المستخدم أثناء فتح نافذة أو الكتابة في حقل
+      const modalOpen=document.querySelector('.modal-bg[style*="flex"],.modal-bg.open');
+      const typing=document.activeElement&&['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName);
       suppressPush=true;
       DB=val;
       localStorage.setItem(DB_KEY,JSON.stringify(DB));
       ensureTables();
-      setSync('online');
-      if(fbUser){buildNav&&buildNav();if(currentPage)renderPage(currentPage);}
+      if(fbUser&&!modalOpen&&!typing){buildNav&&buildNav();if(currentPage)renderPage(currentPage);}
       suppressPush=false;
     }
   },err=>{console.error(err);setSync('offline');});
@@ -882,6 +896,7 @@ function boot(){
   loadDB();
   autoDailyBackup();
   $('#curDate').textContent=new Date().toLocaleDateString('ar-EG');
+  if($('#verChip'))$('#verChip').textContent=APP_VERSION;
   // وضع Firebase أو وضع محلي
   if(fbConfigured()&&initFirebase()){
     setSync('offline');
@@ -891,7 +906,7 @@ function boot(){
         onLoggedIn();
       }else{
         fbUser=null;
-        $('#loginScreen').classList.remove('hidden');
+        $('#loginScreen').classList.add('show');$('#loginScreen').classList.remove('hidden');
         $('#app').classList.remove('ready');
       }
     });
@@ -900,7 +915,7 @@ function boot(){
   }else{
     // وضع محلي بالكامل (بدون Firebase) — للتجربة من ملف file://
     setSync('local');
-    $('#loginScreen').classList.add('hidden');
+    $('#loginScreen').classList.remove('show');$('#loginScreen').classList.add('hidden');
     $('#app').classList.add('ready');
     $('#logoutBtn').style.display='none';
     buildNav();go('dashboard');
@@ -920,7 +935,7 @@ function doLogin(){
 }
 function doLogout(){if(fbAuth)fbAuth.signOut();}
 async function onLoggedIn(){
-  $('#loginScreen').classList.add('hidden');
+  $('#loginScreen').classList.remove('show');$('#loginScreen').classList.add('hidden');
   $('#app').classList.add('ready');
   $('#lg_msg').textContent='';if($('#lg_pass'))$('#lg_pass').value='';
   $('#logoutBtn').style.display='inline-flex';
