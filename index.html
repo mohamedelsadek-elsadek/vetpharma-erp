@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>نظام إدارة مخازن الأدوية البيطرية - ERP v22</title>
+<title>نظام إدارة مخازن الأدوية البيطرية - ERP v23</title>
 <style>
 /* ============ المتغيرات والثيم ============ */
 :root{
@@ -416,7 +416,7 @@ function toast(msg,type=''){const t=document.createElement('div');t.className='t
 
 /* ---------- إدارة الحالة والتخزين ---------- */
 const DB_KEY='vetpharm_erp_v1';
-const APP_VERSION='v22 — 2026-06-22';
+const APP_VERSION='v23 — 2026-06-22';
 let DB={};
 
 /* ====================================================================
@@ -616,6 +616,8 @@ function buildNav(){
   });
 }
 function go(id){
+  // ضمان إخفاء شاشة الدخول طالما هناك جلسة أو في الوضع المحلي
+  if(fbUser||!fbConfigured()){$('#loginScreen').classList.remove('show');$('#app').classList.add('ready');}
   currentPage=id;
   const m=MODULES.find(x=>x.id===id);
   $('#pageTitle').textContent=m.name;$('#pageSub').textContent=m.sub;
@@ -900,14 +902,18 @@ function boot(){
   // وضع Firebase أو وضع محلي
   if(fbConfigured()&&initFirebase()){
     setSync('offline');
+    let authSettled=false;
     fbAuth.onAuthStateChanged(user=>{
+      authSettled=true;
       if(user){
         fbUser=user;
+        $('#loginScreen').classList.remove('show'); // ضمان الإخفاء فوراً
         onLoggedIn();
       }else{
         fbUser=null;
-        $('#loginScreen').classList.add('show');
         $('#app').classList.remove('ready');
+        // أظهر الدخول فقط بعد تأكّد عدم وجود جلسة (تفادي وميض أثناء استرجاع الجلسة)
+        setTimeout(()=>{ if(!fbUser){$('#loginScreen').classList.add('show');} },400);
       }
     });
     $('#lg_btn').onclick=doLogin;
