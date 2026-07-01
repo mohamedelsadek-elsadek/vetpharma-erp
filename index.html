@@ -188,6 +188,11 @@ table.subtbl td{border:1px solid #e4e9ef;padding:6px;font-size:11.5px;text-align
 table.subtbl td.nm{text-align:right;font-weight:600}
 tr.subwrap>td{border:none!important;padding:0!important;background:#fff}
 .ledsub{font-size:11.5px;color:var(--mut);padding:2px 8px 8px;line-height:1.7}
+tr.detrow>td{padding:0 0 8px!important;background:transparent!important;border:none!important}
+table.linetbl{width:100%;border-collapse:collapse;background:var(--panel2);border-radius:8px;overflow:hidden}
+table.linetbl th{background:var(--line);color:var(--mut);font-size:11px;padding:6px 8px;font-weight:700;text-align:center}
+table.linetbl td{padding:6px 8px;font-size:12px;text-align:center;color:var(--txt);border-top:1px solid var(--line)}
+table.linetbl td.nm{text-align:right;font-weight:600}
 .inv-foot{display:flex;justify-content:space-between;margin-top:16px;gap:20px}
 .inv-terms{flex:1;font-size:12px;color:#555}
 .inv-terms h4{color:#1e3a5f;margin-bottom:6px}
@@ -693,7 +698,7 @@ const DB={items:[],suppliers:[],customers:[],projects:[],branches:['الفرع �
 let fb={url:'',ws:'',on:false};
 let ACTIVE_BRANCH='__all__'; // filter view
 let CURRENT=null; // logged-in user
-const VERSION='v19 — 2026-07-01';
+const VERSION='v20 — 2026-07-01';
 
 const PAGES=['home','insights','buy','po','sell','returns','adjust','cash','ledger','proj','reports','set'];
 const PERM_LABELS={home:'لوحة التحكم',insights:'المتابعة',buy:'استلام بضاعة',po:'طلبيات الشراء',sell:'بيع',returns:'المرتجعات',adjust:'تسوية المخزون',cash:'الخزنة',ledger:'كشوف الحساب',proj:'المشاريع',reports:'التقارير',set:'الضبط (إدارة)'};
@@ -1406,7 +1411,7 @@ function renderReturns(){
   const q=($('retSearch')?$('retSearch').value:'').trim().toLowerCase();
   let rs=[...(DB.returns||[])].filter(inBranch).sort((a,b)=>b.created-a.created);
   if(q)rs=rs.filter(r=>(r.party||'').toLowerCase().includes(q)||(r.reason||'').toLowerCase().includes(q)||(r.date||'').includes(q));
-  tb.innerHTML=rs.length?rs.map(r=>`<tr><td>${r.date}</td><td><span class="pill ${r.kind==='sale'?'out':'in'}">${r.kind==='sale'?'مرتجع بيع':'مرتجع شراء'}</span></td><td>${esc(r.party)}</td><td>${money(r.total)}</td><td>${esc(r.reason)||'—'}</td><td><span class="del" onclick="delReturn('${r.id}')">×</span></td></tr>`).join(''):'<tr><td colspan="6" class="empty">لا توجد مرتجعات</td></tr>';
+  tb.innerHTML=rs.length?rs.map(r=>`<tr><td>${r.date}</td><td><span class="pill ${r.kind==='sale'?'out':'in'}">${r.kind==='sale'?'مرتجع بيع':'مرتجع شراء'}</span></td><td>${esc(r.party)}</td><td>${money(r.total)}</td><td>${esc(r.reason)||'—'}</td><td><span class="del" onclick="delReturn('${r.id}')">×</span></td></tr>`+invLinesDetail(r.lines,6)).join(''):'<tr><td colspan="6" class="empty">لا توجد مرتجعات</td></tr>';
 }
 
 /* ============ STOCK ADJUSTMENTS ============ */
@@ -1649,7 +1654,7 @@ function renderPo(){
     const statusLbl=po.status==='received'?'<span class="pill in">تم الاستلام</span>':(po.status==='cancelled'?'<span class="pill out">ملغي</span>':'<span class="pill loan">مفتوح</span>');
     let btns=`<button class="btn sm sec" onclick="printPo('${po.id}')">🖨</button>`;
     if(po.status==='open')btns=`<button class="btn sm sec" onclick="receivePo('${po.id}')">📥 استلام</button>`+btns+`<span class="del" onclick="delPo('${po.id}')">×</span>`;
-    return `<tr><td>${po.date}</td><td>${esc(po.supplier)}</td><td>${money(po.total)}</td><td>${statusLbl}</td><td class="flx noprint">${btns}</td></tr>`;
+    return `<tr><td>${po.date}</td><td>${esc(po.supplier)}</td><td>${money(po.total)}</td><td>${statusLbl}</td><td class="flx noprint">${btns}</td></tr>`+invLinesDetail(po.lines,5);
   }).join(''):'<tr><td colspan="5" class="empty">لا توجد طلبيات</td></tr>';
 }
 function receivePo(id){
@@ -1798,13 +1803,22 @@ function linesLabel(lines){
   if(lines.length===1)return esc(lines[0].item);
   return esc(lines[0].item)+' +'+(lines.length-1);
 }
+// full item breakdown shown as a nested row under each invoice (item · unit · qty · price · total)
+function invLinesDetail(lines,colspan){
+  if(!lines||!lines.length)return '';
+  const rowsHtml=lines.map(l=>{
+    const unit=((DB.itemUnits||{})[l.item]||{}).name||'';
+    return `<tr><td class="nm">${esc(l.item)}</td><td>${esc(unit)||'—'}</td><td>${(+l.qty).toLocaleString()}</td><td>${(+l.price).toFixed(2)}</td><td>${(l.qty*l.price).toFixed(2)}</td></tr>`;
+  }).join('');
+  return `<tr class="detrow"><td colspan="${colspan}"><table class="linetbl"><thead><tr><th>الصنف</th><th>الوحدة</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead><tbody>${rowsHtml}</tbody></table></td></tr>`;
+}
 function renderBuyTable(){
   const tb=$('buyTbl').querySelector('tbody');
   const q=($('buySearch')?$('buySearch').value:'').trim().toLowerCase();
   let ps=[...DB.purchases].filter(inBranch).sort((a,b)=>b.created-a.created);
   if(q)ps=ps.filter(p=>(p.supplier||'').toLowerCase().includes(q)||(p.date||'').includes(q)||(p.inv||'').toLowerCase().includes(q)||p.lines.some(l=>(l.item||'').toLowerCase().includes(q)));
   tb.innerHTML=ps.length?ps.map(p=>{
-    return `<tr><td>${p.date}</td><td>${esc(p.supplier)}</td><td>${money(p.total)}</td><td>${linesLabel(p.lines)}</td><td class="flx noprint"><button class="btn sm sec" onclick="printInvoice('buy','${p.id}')">🖨</button><button class="btn sm sec" onclick="editTxn('buy','${p.id}')">✎</button><span class="del" onclick="delPurchase('${p.id}')">×</span></td></tr>`;
+    return `<tr><td>${p.date}</td><td>${esc(p.supplier)}</td><td>${money(p.total)}</td><td>${linesLabel(p.lines)}</td><td class="flx noprint"><button class="btn sm sec" onclick="printInvoice('buy','${p.id}')">🖨</button><button class="btn sm sec" onclick="editTxn('buy','${p.id}')">✎</button><span class="del" onclick="delPurchase('${p.id}')">×</span></td></tr>`+invLinesDetail(p.lines,5);
   }).join(''):'<tr><td colspan="5" class="empty">لا توجد نتائج</td></tr>';
 }
 function renderSellTable(){
@@ -1812,7 +1826,7 @@ function renderSellTable(){
   const q=($('sellSearch')?$('sellSearch').value:'').trim().toLowerCase();
   let ss=[...DB.sales].filter(inBranch).sort((a,b)=>b.created-a.created);
   if(q)ss=ss.filter(s=>(s.customer||'').toLowerCase().includes(q)||(s.date||'').includes(q)||(s.inv||'').toLowerCase().includes(q)||s.lines.some(l=>(l.item||'').toLowerCase().includes(q)));
-  tb.innerHTML=ss.length?ss.map(s=>`<tr><td>${s.date}</td><td>${esc(s.customer)}</td><td>${money(s.total)}</td><td class="pos prof-col">${money(s.profit)}</td><td>${linesLabel(s.lines)}</td><td class="flx noprint"><button class="btn sm sec" onclick="printInvoice('sale','${s.id}')">🖨</button><button class="btn sm sec" onclick="editTxn('sell','${s.id}')">✎</button><span class="del" onclick="delSale('${s.id}')">×</span></td></tr>`).join(''):'<tr><td colspan="6" class="empty">لا توجد نتائج</td></tr>';
+  tb.innerHTML=ss.length?ss.map(s=>`<tr><td>${s.date}</td><td>${esc(s.customer)}</td><td>${money(s.total)}</td><td class="pos prof-col">${money(s.profit)}</td><td>${linesLabel(s.lines)}</td><td class="flx noprint"><button class="btn sm sec" onclick="printInvoice('sale','${s.id}')">🖨</button><button class="btn sm sec" onclick="editTxn('sell','${s.id}')">✎</button><span class="del" onclick="delSale('${s.id}')">×</span></td></tr>`+invLinesDetail(s.lines,6)).join(''):'<tr><td colspan="6" class="empty">لا توجد نتائج</td></tr>';
 }
 function renderCash(){
   $('c-bal').textContent=money(treasuryBalance());
@@ -2216,12 +2230,12 @@ function exportExcel(kind){
   let rows=[],fname='export';
   if(kind==='purchases'){
     fname='فواتير-الشراء';
-    rows=[['التاريخ','المورد','رقم الفاتورة','المندوب','الصنف','الكمية','السعر','الإجمالي']];
-    DB.purchases.filter(inBranch).forEach(p=>p.lines.forEach(l=>rows.push([p.date,p.supplier,p.inv||'',p.rep||'',l.item,l.qty,l.price,l.qty*l.price])));
+    rows=[['التاريخ','المورد','رقم الفاتورة','المندوب','الصنف','الوحدة','الكمية','السعر','الإجمالي']];
+    DB.purchases.filter(inBranch).forEach(p=>p.lines.forEach(l=>rows.push([p.date,p.supplier,p.inv||'',p.rep||'',l.item,((DB.itemUnits||{})[l.item]||{}).name||'',l.qty,l.price,l.qty*l.price])));
   }else if(kind==='sales'){
     fname='فواتير-البيع';
-    rows=[['التاريخ','العميل','رقم الفاتورة','الصنف','الكمية','السعر','الإجمالي','الربح (الفاتورة كاملة)']];
-    DB.sales.filter(inBranch).forEach(s=>s.lines.forEach((l,i)=>rows.push([s.date,s.customer,s.inv||'',l.item,l.qty,l.price,l.qty*l.price,i===0?(s.profit||0):''])));
+    rows=[['التاريخ','العميل','رقم الفاتورة','الصنف','الوحدة','الكمية','السعر','الإجمالي','الربح (الفاتورة كاملة)']];
+    DB.sales.filter(inBranch).forEach(s=>s.lines.forEach((l,i)=>rows.push([s.date,s.customer,s.inv||'',l.item,((DB.itemUnits||{})[l.item]||{}).name||'',l.qty,l.price,l.qty*l.price,i===0?(s.profit||0):''])));
   }else if(kind==='cash'){
     fname='سجل-الخزنة';
     rows=[['التاريخ','النوع','الطرف','المبلغ','ملاحظة']];
