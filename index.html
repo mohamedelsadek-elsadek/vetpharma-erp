@@ -182,6 +182,12 @@ table.inv-tbl{width:100%;border-collapse:collapse;margin-top:6px}
 table.inv-tbl th{background:#1e3a5f;color:#fff;padding:10px;font-size:13px}
 table.inv-tbl td{border:1px solid #e0e0e0;padding:9px;font-size:13px;text-align:center}
 table.inv-tbl td.desc{text-align:right}
+table.subtbl{width:88%;margin:4px auto 8px;border-collapse:collapse;background:#fafbfc}
+table.subtbl th{background:#eef2f7;color:#1e3a5f;padding:6px;font-size:11.5px;border:1px solid #d9e0e8;font-weight:700}
+table.subtbl td{border:1px solid #e4e9ef;padding:6px;font-size:11.5px;text-align:center;color:#333}
+table.subtbl td.nm{text-align:right;font-weight:600}
+tr.subwrap>td{border:none!important;padding:0!important;background:#fff}
+.ledsub{font-size:11.5px;color:var(--mut);padding:2px 8px 8px;line-height:1.7}
 .inv-foot{display:flex;justify-content:space-between;margin-top:16px;gap:20px}
 .inv-terms{flex:1;font-size:12px;color:#555}
 .inv-terms h4{color:#1e3a5f;margin-bottom:6px}
@@ -687,7 +693,7 @@ const DB={items:[],suppliers:[],customers:[],projects:[],branches:['الفرع �
 let fb={url:'',ws:'',on:false};
 let ACTIVE_BRANCH='__all__'; // filter view
 let CURRENT=null; // logged-in user
-const VERSION='v18 — 2026-07-01';
+const VERSION='v19 — 2026-07-01';
 
 const PAGES=['home','insights','buy','po','sell','returns','adjust','cash','ledger','proj','reports','set'];
 const PERM_LABELS={home:'لوحة التحكم',insights:'المتابعة',buy:'استلام بضاعة',po:'طلبيات الشراء',sell:'بيع',returns:'المرتجعات',adjust:'تسوية المخزون',cash:'الخزنة',ledger:'كشوف الحساب',proj:'المشاريع',reports:'التقارير',set:'الضبط (إدارة)'};
@@ -1835,16 +1841,25 @@ function fillLedgerSelect(){
 function ledgerRows(kind,name){
   const rows=[];
   if(kind==='sup'){
-    DB.purchases.forEach(p=>{if(p.supplier===name&&inBranch(p))rows.push({d:p.date,o:p.created,desc:'فاتورة شراء'+(p.inv?' #'+p.inv:''),debit:0,credit:p.total});});
+    DB.purchases.forEach(p=>{if(p.supplier===name&&inBranch(p))rows.push({d:p.date,o:p.created,desc:'فاتورة شراء'+(p.inv?' #'+p.inv:''),debit:0,credit:p.total,lines:p.lines});});
     DB.cash.forEach(c=>{if(c.type==='pay'&&c.party===name&&inBranch(c))rows.push({d:c.date,o:c.created,desc:'سداد'+(c.note?' - '+c.note:''),debit:c.amt,credit:0});});
-    (DB.returns||[]).forEach(r=>{if(r.kind==='purchase'&&r.party===name&&inBranch(r))rows.push({d:r.date,o:r.created,desc:'مرتجع شراء'+(r.reason?' - '+r.reason:''),debit:r.total,credit:0});});
+    (DB.returns||[]).forEach(r=>{if(r.kind==='purchase'&&r.party===name&&inBranch(r))rows.push({d:r.date,o:r.created,desc:'مرتجع شراء'+(r.reason?' - '+r.reason:''),debit:r.total,credit:0,lines:r.lines});});
   }else{
-    DB.sales.forEach(s2=>{if(s2.customer===name&&inBranch(s2))rows.push({d:s2.date,o:s2.created,desc:'فاتورة بيع'+(s2.inv?' #'+s2.inv:''),debit:s2.total,credit:0});});
+    DB.sales.forEach(s2=>{if(s2.customer===name&&inBranch(s2))rows.push({d:s2.date,o:s2.created,desc:'فاتورة بيع'+(s2.inv?' #'+s2.inv:''),debit:s2.total,credit:0,lines:s2.lines});});
     DB.cash.forEach(c=>{if(c.type==='collect'&&c.party===name&&inBranch(c))rows.push({d:c.date,o:c.created,desc:'تحصيل'+(c.note?' - '+c.note:''),debit:0,credit:c.amt});});
-    (DB.returns||[]).forEach(r=>{if(r.kind==='sale'&&r.party===name&&inBranch(r))rows.push({d:r.date,o:r.created,desc:'مرتجع بيع'+(r.reason?' - '+r.reason:''),debit:0,credit:r.total});});
+    (DB.returns||[]).forEach(r=>{if(r.kind==='sale'&&r.party===name&&inBranch(r))rows.push({d:r.date,o:r.created,desc:'مرتجع بيع'+(r.reason?' - '+r.reason:''),debit:0,credit:r.total,lines:r.lines});});
   }
   rows.sort((a,b)=>a.o-b.o);
   return rows;
+}
+function itemUnitLabel(item){
+  const u=(DB.itemUnits||{})[item];
+  return (u&&u.name)?u.name:'—';
+}
+function subTableHtml(lines){
+  if(!lines||!lines.length)return '';
+  const trs=lines.map(l=>`<tr><td class="nm">${esc(l.item)}</td><td>${esc(itemUnitLabel(l.item))}</td><td>${l.qty}</td><td>${(+l.price).toFixed(2)}</td><td>${(l.qty*l.price).toFixed(2)}</td></tr>`).join('');
+  return `<tr class="subwrap"><td colspan="5"><table class="subtbl"><thead><tr><th>اسم الصنف</th><th>الوحدة</th><th>الكمية</th><th>السعر</th><th>إجمالي السعر</th></tr></thead><tbody>${trs}</tbody></table></td></tr>`;
 }
 function renderLedger(){
   const v=$('led-sel').value;if(!v||!v.includes('|')){$('ledTbl').querySelector('tbody').innerHTML='';$('led-bal').textContent='0';return;}
@@ -1852,7 +1867,10 @@ function renderLedger(){
   const rows=ledgerRows(kind,name);
   let bal=0;
   const tb=$('ledTbl').querySelector('tbody');
-  tb.innerHTML=rows.length?rows.map(r=>{bal+=r.debit-r.credit;return `<tr><td>${r.d}</td><td>${esc(r.desc)}</td><td>${r.debit?money(r.debit):''}</td><td>${r.credit?money(r.credit):''}</td><td class="${bal>=0?'gld':'pos'}">${money(bal)}</td></tr>`;}).join(''):'<tr><td colspan="5" class="empty">لا توجد حركات</td></tr>';
+  tb.innerHTML=rows.length?rows.map(r=>{bal+=r.debit-r.credit;
+    let h=`<tr><td>${r.d}</td><td>${esc(r.desc)}</td><td>${r.debit?money(r.debit):''}</td><td>${r.credit?money(r.credit):''}</td><td class="${bal>=0?'gld':'pos'}">${money(bal)}</td></tr>`;
+    if(r.lines&&r.lines.length)h+=`<tr><td></td><td colspan="4" class="ledsub">${r.lines.map(l=>esc(l.item)+' — '+l.qty+' × '+(+l.price).toFixed(2)+' = '+(l.qty*l.price).toFixed(2)).join('<br>')}</td></tr>`;
+    return h;}).join(''):'<tr><td colspan="5" class="empty">لا توجد حركات</td></tr>';
   const final=kind==='sup'?supplierBalance(name):customerBalance(name);
   $('led-bal').textContent=money(Math.abs(final));
   if(kind==='sup'){$('led-lbl').textContent=final>=0?'مستحق عليك للمورد':'دفعت زيادة (له عندك)';$('led-note').textContent=final>=0?'لازم تدفع له المبلغ ده':'';}
@@ -1864,7 +1882,7 @@ function printStatement(){
   const rows=ledgerRows(kind,name);
   let bal=0;
   const co=DB.company;
-  const rowsHtml=rows.map(r=>{bal+=r.debit-r.credit;return `<tr><td>${r.d}</td><td class="desc">${esc(r.desc)}</td><td>${r.debit?r.debit.toFixed(2):'-'}</td><td>${r.credit?r.credit.toFixed(2):'-'}</td><td>${bal.toFixed(2)}</td></tr>`;}).join('');
+  const rowsHtml=rows.map(r=>{bal+=r.debit-r.credit;return `<tr><td>${r.d}</td><td class="desc">${esc(r.desc)}</td><td>${r.debit?r.debit.toFixed(2):'-'}</td><td>${r.credit?r.credit.toFixed(2):'-'}</td><td>${bal.toFixed(2)}</td></tr>`+subTableHtml(r.lines);}).join('');
   const partyLbl=kind==='sup'?'المورّد':'العميل';
   const finalBal=kind==='sup'?supplierBalance(name):customerBalance(name);
   const balLbl=kind==='sup'?(finalBal>=0?'مستحق عليك (له)':'رصيد لك (عليه)'):(finalBal>=0?'مستحق لك (عليه)':'رصيد زائد (له)');
@@ -2295,6 +2313,17 @@ function waStatement(){
   txt+='كشف حساب — '+s.name+'\n';
   txt+='التاريخ: '+today()+'\n';
   txt+='—————\n';
+  const rws=ledgerRows(s.kind,s.name);
+  if(rws.length>15)txt+='(معروض آخر 15 حركة)\n';
+  let runBal=0;
+  rws.forEach((r,i)=>{
+    runBal+=r.debit-r.credit;
+    if(i>=rws.length-15){ // آخر 15 حركة فقط عشان الرسالة متبقاش ضخمة
+      txt+=r.d+' | '+r.desc+' | '+(r.debit?r.debit.toFixed(0):'-')+' / '+(r.credit?r.credit.toFixed(0):'-')+' | رصيد '+runBal.toFixed(0)+'\n';
+      if(r.lines)r.lines.forEach(l=>{txt+='   • '+l.item+' — '+l.qty+' × '+(+l.price).toFixed(2)+' = '+(l.qty*l.price).toFixed(2)+'\n';});
+    }
+  });
+  txt+='—————\n';
   txt+=s.balLbl+': '+money(Math.abs(s.finalBal))+'\n';
   txt+='عدد الحركات: '+s.count+'\n';
   if(co.phone)txt+='\nللتواصل: '+co.phone;
@@ -2355,7 +2384,7 @@ function renderInvoiceDoc(){
   let rows='';
   for(let i=0;i<Math.max(ROWS,v.lines.length);i++){
     const l=v.lines[i];
-    if(l)rows+=`<tr><td>${i+1}</td><td class="desc">${esc(l.item)}</td><td>${(l.qty||'').toLocaleString?l.qty.toLocaleString():l.qty}</td><td>${esc(l.unit||'')}</td><td>${l.price.toFixed(2)}</td><td>${(l.qty*l.price).toFixed(2)}</td></tr>`;
+    if(l)rows+=`<tr><td>${i+1}</td><td class="desc">${esc(l.item)}</td><td>${(l.qty||'').toLocaleString?l.qty.toLocaleString():l.qty}</td><td>${esc(l.unit||(((DB.itemUnits||{})[l.item]||{}).name)||'')}</td><td>${l.price.toFixed(2)}</td><td>${(l.qty*l.price).toFixed(2)}</td></tr>`;
     else rows+=`<tr><td>${i+1}</td><td></td><td></td><td></td><td></td><td></td></tr>`;
   }
   const grand=v.sub-(v.disc||0);
