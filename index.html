@@ -667,6 +667,9 @@ table.linetbl td.nm{text-align:right;font-weight:600}
     <div class="flx"><input id="fb-ws" placeholder="trade1"><button class="btn sm sec" onclick="genSecretWs()" title="توليد اسم سري">🎲</button></div>
     <div class="hint">🛡️ <b>مهم للأمان:</b> طالما قواعد Firebase مفتوحة، اسم المساحة هو خط الدفاع الوحيد. استخدم زر 🎲 لتوليد اسم سري طويل يصعب تخمينه، وبلاش أسماء بسيطة زي trade1. (غيّرت الاسم؟ البيانات هتتنقل تلقائي مع أول حفظ.)</div>
     <button class="btn" onclick="setupSync()">تفعيل المزامنة</button>
+    <button class="btn sec" onclick="testSync()">🔌 اختبار الاتصال</button>
+    <button class="btn sec" onclick="pullFb()">⬇️ سحب من السحابة الآن</button>
+    <div class="hint" id="syncStatus" style="margin-top:8px"></div>
   </div>
 </div>
 
@@ -698,7 +701,7 @@ const DB={items:[],suppliers:[],customers:[],projects:[],branches:['الفرع �
 let fb={url:'',ws:'',on:false};
 let ACTIVE_BRANCH='__all__'; // filter view
 let CURRENT=null; // logged-in user
-const VERSION='v20 — 2026-07-01';
+const VERSION='v21 — 2026-07-01';
 
 const PAGES=['home','insights','buy','po','sell','returns','adjust','cash','ledger','proj','reports','set'];
 const PERM_LABELS={home:'لوحة التحكم',insights:'المتابعة',buy:'استلام بضاعة',po:'طلبيات الشراء',sell:'بيع',returns:'المرتجعات',adjust:'تسوية المخزون',cash:'الخزنة',ledger:'كشوف الحساب',proj:'المشاريع',reports:'التقارير',set:'الضبط (إدارة)'};
@@ -868,7 +871,7 @@ function load(){
 
 /* ============ FIREBASE (REST) — record-level merge sync ============ */
 function fbBase(){return fb.url.replace(/\/$/,'')+'/tradeSys/'+(fb.ws||'default')+'.json';}
-const SYNC_COLLECTIONS=['purchases','sales','cash','returns','adjustments','purchaseOrders','users','auditLog'];
+const SYNC_COLLECTIONS=['purchases','sales','cash','returns','adjustments','purchaseOrders','users'];
 function recTime(r){return r.updated||r.created||r.t||0;}
 /* merge remote DB into local: union records by id (newest wins), tombstones delete everywhere */
 function mergeRemote(remote){
@@ -905,35 +908,78 @@ function mergeRemote(remote){
   (DB.users||[]).forEach(u=>{if(u.pin&&!u.pinH){u.pinH=pinHash(u.pin,userSeed(u));delete u.pin;}});
 }
 function markDeleted(id){if(!DB.tombstones)DB.tombstones={};DB.tombstones[id]=Date.now();}
-let PUSHING=false,PUSH_AGAIN=false;
+let PUSHING=false,PUSH_AGAIN=false,SYNC_ERR='';
 async function pushFb(){
   if(!fb.url)return;
   if(PUSHING){PUSH_AGAIN=true;return;}
   PUSHING=true;
   try{
     // pull-merge-push: never blindly overwrite remote
-    const r=await fetch(fbBase());const d=await r.json();
+    const r=await fetch(fbBase());
+    if(!r.ok)throw new Error('HTTP '+r.status+(r.status===401||r.status===403?' — قواعد Firebase مرفوضة (Permission denied)':''));
+    const d=await r.json();
     if(d&&d.DB)mergeRemote(d.DB);
-    await fetch(fbBase(),{method:'PUT',body:JSON.stringify({DB,t:Date.now()})});
+    cleanTombstones();
+    // auditLog stays local-only (per-device) to keep the sync payload small
+    const payload=Object.assign({},DB);payload.auditLog=undefined;
+    const pr=await fetch(fbBase(),{method:'PUT',body:JSON.stringify({DB:payload,t:Date.now()})});
+    if(!pr.ok)throw new Error('HTTP '+pr.status+(pr.status===401||pr.status===403?' — قواعد Firebase مرفوضة (Permission denied)':''));
     try{localStorage.setItem('tradeSys',JSON.stringify({DB,fb}));}catch(e){}
-    setSync(true);
-  }catch(e){setSync(false);}
+    SYNC_ERR='';setSync(true);
+  }catch(e){SYNC_ERR=syncErrMsg(e);setSync(false);}
   PUSHING=false;
   if(PUSH_AGAIN){PUSH_AGAIN=false;pushFb();}
+}
+function syncErrMsg(e){
+  const m=(e&&e.message)||'';
+  if(/Failed to fetch|NetworkError|Load failed/i.test(m))return 'تعذّر الاتصال بالإنترنت أو الرابط غلط';
+  if(/403|401|Permission/i.test(m))return 'قواعد Firebase مرفوضة — لازم تكون read/write=true و Published';
+  return m||'خطأ غير معروف';
+}
+function cleanTombstones(){
+  // drop tombstones older than 60 days to prevent unbounded growth
+  if(!DB.tombstones)return;
+  const cut=Date.now()-60*24*60*60*1000;
+  Object.keys(DB.tombstones).forEach(id=>{if(DB.tombstones[id]<cut)delete DB.tombstones[id];});
 }
 async function pullFb(){
   if(!fb.url)return;
   try{
-    const r=await fetch(fbBase());const d=await r.json();
-    if(d&&d.DB){mergeRemote(d.DB);setSync(true);renderLogin();if(CURRENT)renderAll();
+    const r=await fetch(fbBase());
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d&&d.DB){mergeRemote(d.DB);SYNC_ERR='';setSync(true);renderLogin();if(CURRENT)renderAll();
       try{localStorage.setItem('tradeSys',JSON.stringify({DB,fb}));}catch(e){}}
-    else{setSync(true);} // connected but empty is still "connected"
-  }catch(e){setSync(false);}
+    else{SYNC_ERR='';setSync(true);} // connected but empty is still "connected"
+  }catch(e){SYNC_ERR=syncErrMsg(e);setSync(false);}
 }
 function setSync(ok){
   fb.on=!!fb.url;
   $('syncDot').className='dot '+(fb.url?(ok?'on':'off'):'');
   $('syncTxt').textContent=fb.url?(ok?'متزامن':'غير متصل'):'محلي';
+  const s=$('syncStatus');
+  if(s){
+    if(!fb.url)s.textContent='';
+    else if(ok)s.textContent='✅ المزامنة شغالة';
+    else s.textContent='⚠️ غير متصل — السبب: '+(SYNC_ERR||'غير معروف');
+  }
+}
+async function testSync(){
+  if(!fb.url){toast('فعّل المزامنة الأول','err');return;}
+  busy(true,'⏳ جاري اختبار الاتصال...');
+  try{
+    const testKey=fb.url.replace(/\/$/,'')+'/tradeSys/'+(fb.ws||'default')+'/__test.json';
+    const w=await fetch(testKey,{method:'PUT',body:JSON.stringify({t:Date.now()})});
+    busy(false);
+    if(!w.ok){
+      if(w.status===401||w.status===403)toast('❌ قواعد Firebase مرفوضة — لازم read/write=true و Published','err',5000);
+      else toast('❌ فشل الاتصال (HTTP '+w.status+')','err',4000);
+      return;
+    }
+    // cleanup test key
+    await fetch(testKey,{method:'DELETE'}).catch(()=>{});
+    toast('✅ الاتصال شغال تمام — الرابط والقواعد سليمة',null,4000);
+  }catch(e){busy(false);toast('❌ '+syncErrMsg(e),'err',5000);}
 }
 function genSecretWs(){
   const chars='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
