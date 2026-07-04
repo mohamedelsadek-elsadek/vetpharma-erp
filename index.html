@@ -648,6 +648,16 @@ table.linetbl td.nm{text-align:right;font-weight:600}
     <div class="hint" id="ai-key-status" style="margin-top:6px"></div>
   </div>
 
+  <div class="section" id="sec-excel-import">
+    <h2><span class="ic">📥</span> إدخال بيانات من Excel</h2>
+    <div class="hint">حمّل القوالب، املأها في Excel (أصناف، عملاء/موردين، فواتير قديمة بتواريخها)، وارفعها. النظام هيسجّل كل حاجة ويحسب المخزون والأرباح بأثر رجعي حسب التواريخ.</div>
+    <button class="btn" onclick="downloadTemplates()">⬇ تنزيل قوالب Excel</button>
+    <label style="margin-top:14px">رفع ملف Excel المعبّأ</label>
+    <input type="file" accept=".xlsx,.xls" id="excelImportFile" onchange="importExcel(event)">
+    <div class="hint">بيضيف للبيانات الحالية (مش بيمسحها). هيتعمل نسخة احتياطية تلقائية قبل الإضافة.</div>
+    <div id="excelImportLog" style="margin-top:10px"></div>
+  </div>
+
   <div class="section" id="sec-backup">
     <h2><span class="ic">⬇</span> النسخ الاحتياطي</h2>
     <button class="btn" onclick="exportData()">⬇ تصدير نسخة احتياطية (JSON)</button>
@@ -701,7 +711,7 @@ const DB={items:[],suppliers:[],customers:[],projects:[],branches:['الفرع �
 let fb={url:'',ws:'',on:false};
 let ACTIVE_BRANCH='__all__'; // filter view
 let CURRENT=null; // logged-in user
-const VERSION='v21 — 2026-07-01';
+const VERSION='v22 — 2026-07-01';
 
 const PAGES=['home','insights','buy','po','sell','returns','adjust','cash','ledger','proj','reports','set'];
 const PERM_LABELS={home:'لوحة التحكم',insights:'المتابعة',buy:'استلام بضاعة',po:'طلبيات الشراء',sell:'بيع',returns:'المرتجعات',adjust:'تسوية المخزون',cash:'الخزنة',ledger:'كشوف الحساب',proj:'المشاريع',reports:'التقارير',set:'الضبط (إدارة)'};
@@ -2271,6 +2281,147 @@ function exportPNG(elId,fname){
   const bg=getComputedStyle(document.body).getPropertyValue('--bg').trim()||'#0f1419';
   captureElement(el,fname,bg);
 }
+/* ============ EXCEL DATA IMPORT ============ */
+function downloadTemplates(){
+  if(typeof XLSX==='undefined'){toast('أداة Excel لم تتحمّل (محتاج إنترنت)','err');return;}
+  const wb=XLSX.utils.book_new();
+  // Items sheet
+  const items=[['اسم الصنف','الوحدة (اختياري)','الحد الأدنى (اختياري)'],
+    ['مثال: تيمولين 45%','عبوة 100جم',5],
+    ['مثال: أى بيرد 5000','2500',10]];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(items),'الأصناف');
+  // Parties sheet
+  const parties=[['النوع (عميل/مورد)','الاسم','رصيد افتتاحي (اختياري)','تاريخ الرصيد (YYYY-MM-DD)'],
+    ['عميل','مثال: مخزن المصريه',0,'2026-01-01'],
+    ['مورد','مثال: فاكسينوفا الدوليه',0,'2026-01-01']];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(parties),'العملاء والموردين');
+  // Sales invoices sheet
+  const sales=[['رقم الفاتورة','التاريخ (YYYY-MM-DD)','العميل','الصنف','الكمية','سعر البيع','محصّل نقدًا (اختياري)'],
+    ['S-1001','2026-01-05','مخزن المصريه','تيمولين 45%',144,275,0],
+    ['S-1001','2026-01-05','مخزن المصريه','أى بيرد 5000',40,3350,0],
+    ['S-1002','2026-01-14','السيد حجاج','قوالب تبخير',32,450,5000]];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sales),'فواتير البيع');
+  // Purchase invoices sheet
+  const buys=[['رقم الفاتورة','التاريخ (YYYY-MM-DD)','المورد','الصنف','الكمية','سعر الشراء','مدفوع نقدًا (اختياري)','تاريخ الصلاحية (اختياري)'],
+    ['P-2001','2026-01-02','فاكسينوفا الدوليه','تيمولين 45%',200,230,0,''],
+    ['P-2002','2026-01-03','ميديكس برو','أى بيرد 5000',60,2900,10000,'2027-06-30']];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(buys),'فواتير الشراء');
+  // Instructions sheet
+  const help=[['تعليمات مهمة'],
+    ['1) لا تغيّر أسماء الأعمدة (الصف الأول) في أي شيت.'],
+    ['2) امسح صفوف الأمثلة قبل ما تحط بياناتك.'],
+    ['3) الفاتورة اللي فيها أكتر من صنف: كرّر نفس رقم الفاتورة في كل سطر صنف.'],
+    ['4) التاريخ لازم يكون بالشكل YYYY-MM-DD (مثال: 2026-01-05).'],
+    ['5) الأصناف والعملاء/الموردين اللي في الفواتير بيتضافوا تلقائيًا لو مش موجودين.'],
+    ['6) الاستيراد بيضيف للبيانات الحالية، وبيتعمل نسخة احتياطية تلقائية قبله.'],
+    ['7) الأصناف اللي ليها رصيد افتتاحي: سجّلها كفاتورة شراء قديمة بدل الرصيد عشان المخزون والتكلفة يبقوا مظبوطين.']];
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(help),'تعليمات');
+  XLSX.writeFile(wb,'قوالب-الإدخال-'+today()+'.xlsx');
+  toast('✅ نزّلت القوالب — املأها وارفعها');
+}
+function normDate(v){
+  if(v==null||v==='')return '';
+  if(typeof v==='number'){ // Excel serial date
+    const d=XLSX.SSF?XLSX.SSF.parse_date_code(v):null;
+    if(d)return d.y+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0');
+  }
+  const s=(''+v).trim().slice(0,10);
+  return s;
+}
+function importExcel(e){
+  const f=e.target.files[0];if(!f)return;
+  if(typeof XLSX==='undefined'){toast('أداة Excel لم تتحمّل (محتاج إنترنت)','err');e.target.value='';return;}
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const wb=XLSX.read(r.result,{type:'array'});
+      const find=(...keys)=>{const n=wb.SheetNames.find(x=>keys.some(k=>x.includes(k)));return n?XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:''}):[];};
+      // staging buffers (nothing touches DB until user confirms)
+      const add={items:[],itemUnits:{},itemMins:{},customers:[],suppliers:[],sales:[],purchases:[],cash:[]};
+      const hasItem=n=>DB.items.includes(n)||add.items.includes(n);
+      const hasCust=n=>DB.customers.includes(n)||add.customers.includes(n);
+      const hasSup=n=>DB.suppliers.includes(n)||add.suppliers.includes(n);
+      const preview={items:0,parties:0,sales:0,buys:0};
+      // ITEMS
+      find('صنف','الأصناف').forEach(row=>{
+        const name=(''+(row['اسم الصنف']||row['الصنف']||'')).trim();
+        if(!name||name.startsWith('مثال'))return;
+        if(!hasItem(name)){add.items.push(name);preview.items++;}
+        const unit=(''+(row['الوحدة (اختياري)']||row['الوحدة']||'')).trim();
+        if(unit)add.itemUnits[name]={name:unit,factor:0};
+        const mn=row['الحد الأدنى (اختياري)']||row['الحد الأدنى'];
+        if(mn!==''&&mn!=null)add.itemMins[name]=+mn||0;
+      });
+      // PARTIES
+      find('العملاء','الموردين','طرف').forEach(row=>{
+        const type=(''+(row['النوع (عميل/مورد)']||row['النوع']||'')).trim();
+        const name=(''+(row['الاسم']||'')).trim();
+        if(!name||name.startsWith('مثال'))return;
+        if(type.includes('عميل')){if(!hasCust(name)){add.customers.push(name);preview.parties++;}}
+        else{if(!hasSup(name)){add.suppliers.push(name);preview.parties++;}}
+      });
+      const groupInv=(rows,numKey,dateKey,partyKey,itemKey,qtyKey,priceKey)=>{
+        const map={};
+        rows.forEach(row=>{
+          const item=(''+(row[itemKey]||'')).trim();
+          if(!item||item.startsWith('مثال'))return;
+          const num=(''+(row[numKey]||'')).trim();
+          const key=num||('__'+Math.random());
+          if(!map[key])map[key]={num,date:normDate(row[dateKey]),party:(''+(row[partyKey]||'')).trim(),lines:[],extra:row};
+          map[key].lines.push({item,qty:+row[qtyKey]||0,price:+row[priceKey]||0,raw:row});
+        });
+        return Object.values(map);
+      };
+      // SALES
+      groupInv(find('فواتير البيع','البيع'),'رقم الفاتورة','التاريخ (YYYY-MM-DD)','العميل','الصنف','الكمية','سعر البيع').forEach(g=>{
+        if(!g.lines.length)return;
+        if(g.party&&!hasCust(g.party)){add.customers.push(g.party);}
+        g.lines.forEach(l=>{if(l.item&&!hasItem(l.item))add.items.push(l.item);});
+        const total=g.lines.reduce((a,l)=>a+l.qty*l.price,0);
+        const created=Date.parse(g.date)||Date.now();
+        add.sales.push({id:uid(),created,date:g.date||today(),customer:g.party||'—',inv:g.num,lines:g.lines.map(l=>({item:l.item,qty:l.qty,price:l.price})),total,profit:0,branch:currentBranch()});
+        const coll=+((g.extra&&(g.extra['محصّل نقدًا (اختياري)']||g.extra['محصّل نقدًا']))||0);
+        if(coll>0)add.cash.push({id:uid(),created:created+1,date:g.date||today(),type:'collect',party:g.party||'—',amt:coll,note:'تحصيل (استيراد Excel)',till:'cash',branch:currentBranch()});
+        preview.sales++;
+      });
+      // PURCHASES
+      groupInv(find('فواتير الشراء','الشراء'),'رقم الفاتورة','التاريخ (YYYY-MM-DD)','المورد','الصنف','الكمية','سعر الشراء').forEach(g=>{
+        if(!g.lines.length)return;
+        if(g.party&&!hasSup(g.party)){add.suppliers.push(g.party);}
+        g.lines.forEach(l=>{if(l.item&&!hasItem(l.item))add.items.push(l.item);});
+        const total=g.lines.reduce((a,l)=>a+l.qty*l.price,0);
+        const created=Date.parse(g.date)||Date.now();
+        const lines=g.lines.map(l=>({item:l.item,qty:l.qty,price:l.price,exp:normDate(l.raw['تاريخ الصلاحية (اختياري)']||l.raw['تاريخ الصلاحية'])||''}));
+        add.purchases.push({id:uid(),created,date:g.date||today(),supplier:g.party||'—',inv:g.num,lines,total,branch:currentBranch()});
+        const paid=+((g.extra&&(g.extra['مدفوع نقدًا (اختياري)']||g.extra['مدفوع نقدًا']))||0);
+        if(paid>0)add.cash.push({id:uid(),created:created+1,date:g.date||today(),type:'pay',party:g.party||'—',amt:paid,note:'سداد (استيراد Excel)',till:'cash',branch:currentBranch()});
+        preview.buys++;
+      });
+      const total=preview.items+preview.parties+preview.sales+preview.buys;
+      if(total===0){toast('ملقيتش بيانات صالحة في الملف — تأكد إنك استخدمت القوالب','err',4500);e.target.value='';return;}
+      const msg='هيتسجّل:\n• '+preview.items+' صنف جديد\n• '+preview.parties+' عميل/مورد جديد\n• '+preview.sales+' فاتورة بيع\n• '+preview.buys+' فاتورة شراء\n\nهيتعمل نسخة احتياطية تلقائية قبل الإضافة. تمام؟';
+      askConfirm(msg,()=>{
+        makeAutoBackup(true);
+        // apply staged changes
+        add.items.forEach(x=>{if(!DB.items.includes(x))DB.items.push(x);});
+        add.customers.forEach(x=>{if(!DB.customers.includes(x))DB.customers.push(x);});
+        add.suppliers.forEach(x=>{if(!DB.suppliers.includes(x))DB.suppliers.push(x);});
+        if(!DB.itemUnits)DB.itemUnits={};Object.assign(DB.itemUnits,add.itemUnits);
+        if(!DB.itemMins)DB.itemMins={};Object.assign(DB.itemMins,add.itemMins);
+        DB.purchases.push(...add.purchases);
+        DB.sales.push(...add.sales);
+        DB.cash.push(...add.cash);
+        recomputeProfits(); // compute FIFO profit for imported sales
+        save();renderAll();
+        $('excelImportLog').innerHTML='<div class="alert"><span class="ico">✅</span><span>تم الاستيراد: '+preview.items+' صنف، '+preview.parties+' طرف، '+preview.sales+' فاتورة بيع، '+preview.buys+' فاتورة شراء</span></div>';
+        toast('✅ تم استيراد بيانات Excel',null,4000);
+      },{safe:true,yes:'تسجيل'});
+    }catch(err){toast('تعذّر قراءة الملف: '+(err.message||'خطأ'),'err',5000);}
+    e.target.value='';
+  };
+  r.readAsArrayBuffer(f);
+}
+
 function exportExcel(kind){
   if(typeof XLSX==='undefined'){alert('تعذّر تحميل أداة Excel (محتاج إنترنت أول مرة)');return;}
   let rows=[],fname='export';
